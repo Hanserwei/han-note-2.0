@@ -10,7 +10,7 @@
 | 框架 | Spring Boot + Spring Cloud + Spring Cloud Alibaba | 4.1.0 / 2025.1.2 / 2025.1.0.0 |
 | 构建 | Maven (多模块) | 3.9+ |
 | 网关 | Spring Cloud Gateway (WebFlux) | - |
-| 注册中心 | Nacos | - |
+| 注册中心 | Nacos | 3.1.1（与 Spring Cloud Alibaba 管理的客户端版本对齐） |
 | ORM | MyBatis-Plus | 3.5.16 |
 | 数据库 | PostgreSQL | 16 |
 | 缓存 | Redis (Lettuce) + Caffeine (L1 本地) | Caffeine 3.2.2 |
@@ -92,6 +92,16 @@ Client → hannote-gateway (8000) ──→ hannote-auth (8080)
 - **ScyllaDB** (KV 正文存储)
 - **阿里云短信服务** (验证码)
 - **PowerJob Server** (任务调度平台)
+
+### 一键启动本地中间件
+
+已提供带内存限制和持久化卷的 Podman Compose；Compose 只启动中间件，首次插件和业务数据初始化由开发者手工执行：
+
+```bash
+podman-compose -f podman-compose.yml up -d
+```
+
+端口、默认凭据、各服务内存上限及停止方式见 [本地中间件说明](deploy/local/README.md)。
 
 ### 配置文件
 

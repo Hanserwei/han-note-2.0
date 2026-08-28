@@ -1,0 +1,300 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      POSTGRES_DB: hannote
+      POSTGRES_USER: "${POSTGRES_USER:-hannote}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-hannote}"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - max_connections=40
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/local/postgres/init.sql:/schema/init.sql:ro,Z
+      - ./docs/sql:/schema/sql:ro,z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  redis:
+    image: docker.io/redis/redis-stack-server:7.4.0-v8
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-hannote-redis}"
+      REDIS_ARGS: >-
+        --requirepass ${REDIS_PASSWORD:-hannote-redis}
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+        --appendonly yes
+        --loadmodule /modules/libredis-roaring.so
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - redis_modules:/modules:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping)" = "PONG" &&
+          redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning COMMAND INFO BF.ADD | grep -qi 'bf.add' &&
+          redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning COMMAND INFO R64.SETBIT | grep -qi 'r64.setbit'
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+
+  nacos:
+    # Spring Cloud Alibaba 2025.1.0.0 manages nacos-client 3.1.1.
+    image: docker.io/nacos/nacos-server:v3.1.1-slim
+    restart: unless-stopped
+    mem_limit: 640m
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_CONSOLE_ENABLE: "false"
+      # Nacos 3 Docker validates these values even when local auth is disabled.
+      NACOS_AUTH_TOKEN: "SGFubm90ZS1sb2NhbC1uYWNvcy10b2tlbi1hdC1sZWFzdC0zMi1ieXRlcw=="
+      NACOS_AUTH_IDENTITY_KEY: serverIdentity
+      NACOS_AUTH_IDENTITY_VALUE: hannote-local
+      NACOS_DEPLOYMENT_TYPE: merged
+      JVM_XMS: 128m
+      JVM_XMX: 256m
+      JVM_XMN: 64m
+      JVM_MS: 64m
+      JVM_MMS: 128m
+    ports:
+      - "8080:8080"
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    volumes:
+      - nacos_data:/home/nacos/data
+      - nacos_logs:/home/nacos/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/v3/console/health/liveness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  rocketmq-nameserver:
+    image: docker.io/apache/rocketmq:5.3.1
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      HEAP_OPTS: "-Xms128m -Xmx128m -Xmn64m"
+    command: ["sh", "mqnamesrv"]
+    ports:
+      - "9876:9876"
+    volumes:
+      - rocketmq_nameserver_logs:/home/rocketmq/logs
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9876'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+
+  rocketmq-broker:
+    image: docker.io/apache/rocketmq:5.3.1
+    restart: unless-stopped
+    mem_limit: 768m
+    depends_on:
+      - rocketmq-nameserver
+    environment:
+      NAMESRV_ADDR: rocketmq-nameserver:9876
+      HEAP_OPTS: "-Xms384m -Xmx384m -Xmn128m -XX:MaxDirectMemorySize=128m"
+    command:
+      - sh
+      - mqbroker
+      - -c
+      - /home/rocketmq/rocketmq-5.3.1/conf/hannote-broker.conf
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+    volumes:
+      - rocketmq_broker_logs:/home/rocketmq/logs
+      - rocketmq_broker_store:/home/rocketmq/store
+      - ./deploy/local/rocketmq/broker.conf:/home/rocketmq/rocketmq-5.3.1/conf/hannote-broker.conf:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/10911'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.3
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      bootstrap.memory_lock: "false"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - elasticsearch_plugins:/usr/share/elasticsearch/plugins:U
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null"]
+      interval: 10s
+      timeout: 8s
+      retries: 30
+      start_period: 40s
+
+  scylla:
+    image: docker.io/scylladb/scylla:6.2.3
+    restart: unless-stopped
+    mem_limit: 1g
+    command:
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --overprovisioned
+      - "1"
+      - --developer-mode
+      - "1"
+      - --api-address
+      - 0.0.0.0
+    ports:
+      - "9042:9042"
+    volumes:
+      - scylla_data:/var/lib/scylla
+      - ./docs/sql:/schema:ro,z
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'SELECT release_version FROM system.local' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 45s
+
+  rustfs:
+    image: docker.io/rustfs/rustfs:1.0.0-beta.12
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY:-hannoteadmin}"
+      RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY:-hannote-local-secret}"
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_OBS_LOGGER_LEVEL: error
+    command: ["/data"]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  powerjob-mysql:
+    image: docker.io/library/mysql:8.4
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      MYSQL_DATABASE: powerjob-daily
+      MYSQL_ROOT_PASSWORD: "${POWERJOB_MYSQL_PASSWORD:-powerjob-local}"
+      MYSQL_ROOT_HOST: "%"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --innodb-buffer-pool-size=64M
+      - --innodb-log-buffer-size=16M
+      - --max-connections=40
+      - --performance-schema=OFF
+      - --table-open-cache=128
+      - --tmp-table-size=16M
+      - --max-heap-table-size=16M
+    ports:
+      - "3306:3306"
+    volumes:
+      - powerjob_mysql_data:/var/lib/mysql
+      - ./deploy/local/powerjob/powerjob_mysql_5.1.2.sql:/schema/powerjob.sql:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  powerjob-server:
+    image: docker.io/powerjob/powerjob-server:v5.1.2
+    restart: unless-stopped
+    mem_limit: 640m
+    depends_on:
+      - powerjob-mysql
+    environment:
+      JVMOPTIONS: "-Xms128m -Xmx256m -XX:MaxMetaspaceSize=128m"
+      PARAMS: >-
+        --oms.mongodb.enable=false
+        --spring.datasource.core.jdbc-url=jdbc:mysql://powerjob-mysql:3306/powerjob-daily?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+        --spring.datasource.core.username=root
+        --spring.datasource.core.password=${POWERJOB_MYSQL_PASSWORD:-powerjob-local}
+        --spring.datasource.core.maximum-pool-size=10
+        --spring.datasource.core.minimum-idle=1
+        --oms.storage.dfs.mysql_series.url=jdbc:mysql://powerjob-mysql:3306/powerjob-daily?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+        --oms.storage.dfs.mysql_series.username=root
+        --oms.storage.dfs.mysql_series.password=${POWERJOB_MYSQL_PASSWORD:-powerjob-local}
+        --oms.storage.dfs.mysql_series.auto_create_table=true
+    ports:
+      - "7700:7700"
+      - "10086:10086"
+      - "10010:10010"
+      - "10077:10077"
+    volumes:
+      - powerjob_server_data:/root/powerjob/server
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/7700'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+volumes:
+  postgres_data:
+  redis_data:
+  redis_modules:
+    name: hannote_redis_modules
+  nacos_data:
+  nacos_logs:
+  rocketmq_nameserver_logs:
+  rocketmq_broker_logs:
+  rocketmq_broker_store:
+  elasticsearch_data:
+  elasticsearch_plugins:
+    name: hannote_elasticsearch_plugins
+  scylla_data:
+  rustfs_data:
+  powerjob_mysql_data:
+  powerjob_server_data:
