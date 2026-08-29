@@ -7,7 +7,7 @@ import lombok.Getter;
 /**
  * 搜索服务响应码.
  *
- * <p>错误码统一前缀 {@code SEARCH-}。本期（��仅落地通用异常码，
+ * <p>错误码统一前缀 {@code SEARCH-}。本期（）仅落地通用异常码，
  * 业务异常码待后续按需补充（{@code SEARCH-2xxxx}）。
  *
  * @author hanserwei

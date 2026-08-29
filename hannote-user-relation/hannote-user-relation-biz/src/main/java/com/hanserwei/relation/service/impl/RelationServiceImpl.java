@@ -55,7 +55,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>关注接口采用「Redis ZSET 写缓冲 + Lua 原子写」方案：校验不能关注自己、RPC 校验目标用户存在后，
  * 通过 Lua 脚本原子完成「关注上限校验 + 重复关注校验 + ZADD」。ZSET 缓存缺失时从数据库回源同步。
  *
- * <p>注意：本期（��仅写入 Redis，异步落库（MQ 消费者写 t_following/t_fans）
+ * <p>注意：本期（）仅写入 Redis，异步落库（MQ 消费者写 t_following/t_fans）
  * 留待后续章节，见方法末尾 {@code // TODO: 发送 MQ}。
  *
  * @author hanserwei

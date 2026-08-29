@@ -4,7 +4,7 @@ package com.hanserwei.relation.api.constant;
  * 用户关系服务 API 层常量.
  *
  * <p>供消费方通过 {@code @ImportHttpServices(group = RelationApiConstants.SERVICE_NAME, ...)}
- * 注册 RPC 客户端时使用。本期（��尚无对外接口，仅预埋服务名常量。
+ * 注册 RPC 客户端时使用。本期（）尚无对外接口，仅预埋服务名常量。
  *
  * @author hanserwei
  * @date 2026/07/10

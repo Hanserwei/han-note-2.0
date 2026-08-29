@@ -7,7 +7,7 @@ import lombok.Getter;
 /**
  * 用户关系服务响应码.
  *
- * <p>错误码统一前缀 {@code RELATION-}。本期（��仅落地通用异常码，
+ * <p>错误码统一前缀 {@code RELATION-}。本期（）仅落地通用异常码，
  * 业务异常码待后续接口落地时按需补充（{@code RELATION-2xxxx}）。
  *
  * @author hanserwei
