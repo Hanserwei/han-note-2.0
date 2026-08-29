@@ -34,7 +34,33 @@ Content-Type: image/png
     }
 %}
 
-### 2. 访问刚上传的文件（校验 URL 可访问）
+### 2. 上传文件（PNG）—— 直连 OSS 服务，无需 JWT（环境 auth-direct）
+# auth-direct 环境下请求地址为 http://localhost:8081/file/upload
+POST {{ossHost}}{{ossBasePath}}/file/upload
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="sample.png"
+Content-Type: image/png
+
+< ./resources/sample.png
+--WebAppBoundary--
+
+> {%
+    client.test("直连 OSS 上传成功", function () {
+        client.assert(response.status === 200, "HTTP 状态非 200");
+        client.assert(response.body && response.body.success === true,
+            "success 非 true：" + JSON.stringify(response.body));
+        client.assert(response.body && response.body.data != null && response.body.data !== "",
+            "未返回访问 URL");
+    });
+    if (response.body && response.body.success && response.body.data) {
+        client.global.set("lastUploadedUrl", response.body.data);
+        client.log("直连 OSS 上传后的访问地址：" + response.body.data);
+    }
+%}
+
+### 3. 访问刚上传的文件（校验 URL 可访问）
 GET {{lastUploadedUrl}}
 
 > {%
@@ -43,8 +69,8 @@ GET {{lastUploadedUrl}}
     });
 %}
 
-### 3. 经网关上传但不带 JWT —— 预期被网关拦截 401
-# 仅在 gateway 环境下有意义；直连 oss(8081) 时 oss 不鉴权，会返回 200
+### 4. 经网关上传但不带 JWT —— 预期被网关拦截 401
+# 仅在 gateway 环境下执行；直连 oss(8081) 时 oss 不鉴权，会返回 200
 POST {{ossHost}}{{ossBasePath}}/file/upload
 Content-Type: multipart/form-data; boundary=WebAppBoundary
 
