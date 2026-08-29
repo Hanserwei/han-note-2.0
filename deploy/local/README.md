@@ -39,10 +39,15 @@ podman run --rm --user 1000:0 --memory 256m \
 
 ### 4. 启动中间件
 
+若 PowerJob Worker 不在中间件宿主机上，先把 Server 的 LAN 地址传给 Compose，确保 Server 向 Worker 发布可达地址：
+
 ```bash
+export POWERJOB_EXTERNAL_ADDRESS=<中间件服务器IP>
 podman-compose -f podman-compose.yml up -d
 podman-compose -f podman-compose.yml ps
 ```
+
+PowerJob Server 固定使用 Compose 网络地址 `10.90.20.10`，避免容器重建后 `app_info.current_server` 指向失效的动态地址。若只在同一台机器上联调，可不设置 `POWERJOB_EXTERNAL_ADDRESS`，默认使用 `127.0.0.1`。
 
 ### 5. 初始化业务数据
 
@@ -58,13 +63,16 @@ podman-compose -f podman-compose.yml exec powerjob-mysql sh -c \
   'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" powerjob-daily < /schema/powerjob.sql'
 podman-compose -f podman-compose.yml restart powerjob-server
 
-# ScyllaDB keyspace 和正文表
-podman-compose -f podman-compose.yml exec scylla cqlsh 127.0.0.1 9042 -e \
-  "CREATE KEYSPACE IF NOT EXISTS hannote WITH replication = {'class':'SimpleStrategy','replication_factor':1};"
-podman-compose -f podman-compose.yml exec scylla cqlsh 127.0.0.1 9042 \
-  -k hannote -f /schema/note_content.cql
-podman-compose -f podman-compose.yml exec scylla cqlsh 127.0.0.1 9042 \
-  -k hannote -f /schema/comment_content.cql
+# ScyllaDB keyspace 和正文表（Scylla 仅监听容器网络 IP，不能在容器内使用 127.0.0.1）
+podman-compose -f podman-compose.yml exec scylla sh -c \
+  "node_ip=\$(hostname -i | cut -d' ' -f1); cqlsh \"\$node_ip\" 9042 \
+  -f /schema/create-keyspace.cql"
+podman-compose -f podman-compose.yml exec scylla sh -c \
+  "node_ip=\$(hostname -i | cut -d' ' -f1); cqlsh \"\$node_ip\" 9042 \
+  -k hannote -f /schema/note_content.cql"
+podman-compose -f podman-compose.yml exec scylla sh -c \
+  "node_ip=\$(hostname -i | cut -d' ' -f1); cqlsh \"\$node_ip\" 9042 \
+  -k hannote -f /schema/comment_content.cql"
 
 # Elasticsearch note/user 索引
 ES_URL=http://127.0.0.1:9200 ./scripts/es-index/create-indices.sh
@@ -102,9 +110,9 @@ podman-compose -f podman-compose.yml down -v
 | ScyllaDB | `9042` | datacenter `datacenter1` |
 | RustFS | `9000` / `9001` | S3 / Console；`hannoteadmin` / `hannote-local-secret` |
 | PowerJob MySQL | `3306` | `root` / `powerjob-local` |
-| PowerJob Server | `7700` | 默认管理员密码 `powerjob_admin` |
+| PowerJob Server | `7700` | 5.1.2 首次启动无默认控制台用户，需在登录页注册 |
 
-默认密码可通过 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`RUSTFS_ACCESS_KEY`、`RUSTFS_SECRET_KEY`、`POWERJOB_MYSQL_PASSWORD` 环境变量覆盖。
+默认密码可通过 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`RUSTFS_ACCESS_KEY`、`RUSTFS_SECRET_KEY`、`POWERJOB_MYSQL_PASSWORD` 环境变量覆盖。远程 Worker 还应设置 `POWERJOB_EXTERNAL_ADDRESS`。
 
 ## 内存限制
 
@@ -119,6 +127,6 @@ podman-compose -f podman-compose.yml down -v
 | ScyllaDB | 1 GiB | 单核，内部 memory 512 MiB |
 | RustFS | 256 MiB | 容器硬限制 |
 | PowerJob MySQL | 512 MiB | InnoDB buffer pool 64 MiB，最多 40 连接 |
-| PowerJob Server | 640 MiB | Java heap 128–256 MiB |
+| PowerJob Server | 1 GiB | Java heap 256–512 MiB |
 
-常驻服务硬上限合计约 5.75 GiB；这是上限之和，不是预留内存。
+常驻服务硬上限合计约 6.125 GiB；这是上限之和，不是预留内存。
