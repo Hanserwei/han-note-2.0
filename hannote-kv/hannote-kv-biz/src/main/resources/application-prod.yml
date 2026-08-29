@@ -11,3 +11,9 @@ spring:
     port: ${CASSANDRA_PORT:9042}
     local-datacenter: ${CASSANDRA_DATACENTER:datacenter1}
     schema-action: none
+
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER}
+  consumer:
+    group: hannote_group
+    pull-batch-size: 5
